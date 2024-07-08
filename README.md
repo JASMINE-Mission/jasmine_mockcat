@@ -7,3 +7,4 @@ In the process of computing the probabilities of each star, it also samples them
 To-Do:
 - Add the measured proper motions and radial velocities to the Distance posterior.
 - Code it in a way so that it can process many line of sights autonomously. 
+- Add compatibility with .fits files
