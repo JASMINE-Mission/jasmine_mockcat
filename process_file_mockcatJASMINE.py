@@ -423,11 +423,24 @@ def NSD_rho(xb,yb,zb,params):
     except:
         print("Using default value for C1ND.")
         C1ND=2
+    try:
+        RNSDlim = float(params["RNSDlim"])
+    except:
+        print("Using default value for RNSDlim.")
+        RNSDlim=1000
+    try:
+        zNSDlim = float(params["zNSDlim"])
+    except:
+        print("Using default value for zNSDlim.")
+        zNSDlim=400
+    R = np.sqrt(xb**2 + yb**2)
     xn = np.abs(xb/x0ND)
     yn = np.abs(yb/y0ND)
     zn = np.abs(zb/z0ND)
     rs = (xn**C1ND + yn**C1ND)**(1/C1ND) + zn
-    return np.exp(-rs)
+    rho = np.zeros_like(R)
+    rho[(R<RNSDlim)&(np.abs(zb)<zNSDlim)] = np.exp(-rs[(R<RNSDlim)&(np.abs(zb)<zNSDlim)])
+    return rho
 
 def NSC_rho(R,z,params):
     """
