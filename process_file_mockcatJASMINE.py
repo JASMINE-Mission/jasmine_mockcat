@@ -623,6 +623,8 @@ def get_integral_PJHKsmass(dist_bins,hscale,mags_notnan,mag_errors_notnan,A0s_no
     - Mags0: Absolute magnitudes in all bands at distance D for all masses (mag)
     - EJKs: Extinction in J-Ks (mag)
     """
+    #TO-DO: FOR NSD, probability should be 0 at distances that produce R,z combinations outside the range of the moments array (The prior should take care that the likelihood of that is very small, but it will never be nul, and that would produce an error)
+
     probs = []
     for icomp_,MLi in enumerate(ML):
         prob = np.zeros_like(dist_bins)
@@ -1039,7 +1041,7 @@ def sample_velocities(icomp,D,lD,bD,params,Rsun = 8160,zsun=25,xyzSgrA = [0.0065
         sigvz_interpol = params["sigvz_interpol"]
         vrvzcorr_interpol = params["vrvzcorr_interpol"]
         #create PDF
-        gauss = get_velProbNSD(R,z,vphi_interpol,sigvphi_interpol,sigvr_interpol,sigvz_interpol,vrvzcorr_interpol)
+        gauss = get_velProbNSD(R,np.abs(z),vphi_interpol,sigvphi_interpol,sigvr_interpol,sigvz_interpol,vrvzcorr_interpol)
         #sample　PDF
         vr,vphi,vz = sample_normal(gauss,nsamp)
         #convert cylindrical to cartesian
