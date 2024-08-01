@@ -37,28 +37,32 @@ except ImportError:
 #functions
 
 ############## BASIC FUNCTIONS #############
-def Dlb2xyz(D,lD,bD,Rsun = 8160,zsun=25,xyzSgrA = [0.00652738910230255, -7.9754527097427195, -6.551216431968028]):
+def Dlb2xyz(D,lD,bD,Dsun = 8160,zsun=25,xyzSgrA = [-0.01362815601805778, -7.941887440118567, -6.574101760251946]):
     """
-    Transform from distance and Galactic coordinates to XYZ Galactocentric cartesian coordinates.
+    Transform from distance and Galactic coordinates to XYZ Galactocentric cartesian coordinates.(LEFT HANDED!)
 
     - D: distance (any units)
     - lD: Galactic longitude (degrees)
     - bD: Galactic latitude (degrees)
-    - Rsun: Galactocentric radius value of the Sun (in pc)
+    - Dsun: Galactocentric distance to the Sun (in pc)
     - zsun: height of the Sun (pc)
     - xyzSgrA (iterable): location in XYZ Galactocentric cartesian coordinates of SgrA*.
     """
-    cosbsun = np.cos(zsun/Rsun)
-    sinbsun = np.sin(zsun/Rsun)
+    sinbsun = zsun/Dsun
+    bsun = np.arcsin(sinbsun)
+    cosbsun = np.cos(bsun)
     cosb = np.cos(np.deg2rad(bD))
     sinb = np.sin(np.deg2rad(bD))
     cosl = np.cos(np.deg2rad(lD))
     sinl = np.sin(np.deg2rad(lD))
     
-    x = Rsun - D*cosb*cosl
+    x = D*cosb*cosl
     y = D*cosb*sinl
     z = D*sinb
-    return [x - xyzSgrA[0],y - xyzSgrA[1],z*cosbsun + x*sinbsun - xyzSgrA[2]]
+    
+    x = x*cosbsun-z*sinbsun
+    z = z*cosbsun + x*sinbsun
+    return [Dsun*cosbsun - x - xyzSgrA[0],y - xyzSgrA[1],z - zsun - xyzSgrA[2]]
 
 
 
@@ -95,20 +99,20 @@ def getDmean(l,b):
 
 
     
-def get_pos(D,l,b,Rsun=8160,zsun=25,xyzSgrA = [0.00652738910230255, -7.9754527097427195, -6.551216431968028],_cyl=True):
+def get_pos(D,l,b,Dsun=8160,zsun=25,xyzSgrA = [-0.01362815601805778, -7.941887440118567, -6.574101760251946],_cyl=True):
     """
     Given a line of sight (l,b in degrees) and a distance, compute the Galactocentric distance in either cartessian or cylindrical coordinates
 
     - D: distance (any units)
     - lD: Galactic longitude (degrees)
     - bD: Galactic latitude (degrees)
-    - Rsun: Galactocentric radius value of the Sun (in pc)
+    - Dsun: Galactocentric distance to the Sun (in pc)
     - zsun: height of the Sun (pc)
     - xyzSgrA (iterable): location in XYZ Galactocentric cartesian coordinates of SgrA*.
 
     CAREFUL! Left-handed system.
     """
-    x,y,z = Dlb2xyz(D,l,b,Rsun,zsun,xyzSgrA)
+    x,y,z = Dlb2xyz(D,l,b,Dsun,zsun,xyzSgrA)
     
     if _cyl:
         return np.sqrt(x**2 + y**2),z
@@ -116,11 +120,11 @@ def get_pos(D,l,b,Rsun=8160,zsun=25,xyzSgrA = [0.00652738910230255, -7.975452709
         return x,y,z
     
 
-def transform_galcen_toIRCS(x,y,z,vx,vy,vz,Vsun_ =[11.1,248.5,7.25],Rsun_ =8.178,Zsun=0.0208,_skycoord=False):
+def transform_galcen_toIRCS(x,y,z,vx,vy,vz,Vsun_ =[11.1,248.5,7.25],Dsun_ =8.178,Zsun=0.0208,_skycoord=False):
 
     vsun = coord.CartesianDifferential(Vsun_*u.km/u.s)
     gc_frame = coord.Galactocentric(galcen_v_sun=vsun,
-                                    galcen_distance=Rsun_*u.kpc, z_sun=Zsun*u.kpc,)
+                                    galcen_distance=Dsun_*u.kpc, z_sun=Zsun*u.kpc,)
     c = coord.SkyCoord(x=x*u.pc,y=y*u.pc,z=z*u.pc,
                  v_x = vx*u.km/u.second,v_y = vy*u.km/u.second,v_z = vz*u.km/u.second,frame=gc_frame)
     cICRS = c.transform_to(coord.ICRS)
@@ -929,7 +933,7 @@ def get_velProbBar(R,x,y,z,costheta,sintheta,Omega_p=47.4105844018699,y0_str=406
     xb =  x * costheta + y * sintheta
     yb = -x * sintheta + y * costheta
     zb = z
-    vrot = 0.001 * Omega_p * np.sqrt(R)
+    vrot = 0.001 * Omega_p * R
     sigvbs = calc_sigvb(xb, yb, zb,x0_vb,y0_vb,z0_vb,C1_vb,C2_vb,C3_vb,x0_vbz,
                         y0_vbz,z0_vbz,C1_vbz,C2_vbz,C3_vbz,sigx_vb,sigx_vb0,sigy_vb,
                sigy_vb0,sigz_vb,sigz_vb0,model_vb,model_vbz)
@@ -962,15 +966,16 @@ def get_velProbNSD(R,z,vphi_interpol,sigvphi_interpol,sigvr_interpol,sigvz_inter
     
 
 def get_velProbNSC(r,sigvx0,sigvy0,sigvz0):
+    #TO-DO: add proper model -> Check Sormani+2022 and Chatzopoulos et al. 2015 (df = f(E,Lz) => get moments)
     sigxv = sigvx0*np.exp(-r)
     sigvy = sigvy0*np.exp(-r)
     sigvz = sigvz0*np.exp(-r)
     return scipy.stats.multivariate_normal(mean=[0,0,0],cov=np.diag([sigxv,sigvy,sigvz])**2)
 
 
-def sample_velocities(icomp,D,lD,bD,params,Rsun = 8160,zsun=25,xyzSgrA = [0.00652738910230255, -7.9754527097427195, -6.551216431968028], nsamp = 1, dRg = 10):
+def sample_velocities(icomp,D,lD,bD,params,Dsun = 8160,zsun=25,xyzSgrA = [-0.01362815601805778, -7.941887440118567, -6.574101760251946], nsamp = 1, dRg = 10):
     """
-    CAREFUL! Dlb2xyz is a LEFT-HANDED SYSTEM! The output is in a right handed system where the Sun is at x<0 and y>0 towards l>0.
+    CAREFUL! Dlb2xyz is a LEFT-HANDED SYSTEM! The output is in a right handed system where the Sun is at x>0, and y<0 towards l>0.
     For disc kinematics:
     dRg=10,rot_curve,R0,tau,betaU,sigU0,hsigU,betaW,sigW0,hsigW,Rd,
 
@@ -983,7 +988,7 @@ def sample_velocities(icomp,D,lD,bD,params,Rsun = 8160,zsun=25,xyzSgrA = [0.0065
     For NSC kinematics:
     sigvx0_nsc=200,sigvy0_nsc=200,sigvz0_nsc=200
     """
-    x,y,z = Dlb2xyz(D,lD,bD,Rsun,zsun,xyzSgrA)
+    x,y,z = Dlb2xyz(D,lD,bD,Dsun,zsun,xyzSgrA)
 
     R = np.sqrt(x**2 + y**2)
     if icomp<8:
@@ -1228,9 +1233,10 @@ def mapper(row,l,b,sourceidrow,Jrow,Hrow,Ksrow,Jerow,Herow,Kserow,plxrow,plxerow
         params["rot_curve"] = rotation_curve
 
     try:
-        x,y,z,vx,vy,vz = sample_velocities(icomp_rnd,D_rnd,l,b,params)
-    except:
+        x,y,z,vx,vy,vz = sample_velocities(icomp_rnd,D_rnd,l,b,params,Dsun=params_all["Sun"].getfloat("Dsun"),zsun=params_all["Sun"].getfloat("zsun"),xyzSgrA=[params_all["Sun"].getfloat("xSgrA"),params_all["Sun"].getfloat("ySgrA"), params_all["Sun"].getfloat("zSgrA")])
+    except Exception as e:
         print(f"Failed to sample velocities for star {row[sourceidrow]}. Setting values to NaN")
+        print(e)
         x = np.nan; y = np.nan; z = np.nan
         vx = np.nan; vy = np.nan; vz = np.nan
 
@@ -1259,7 +1265,7 @@ def process_line_of_sight(infile):
     A0s = [A0J,A0H,A0Ks]
     
     nD = len(dist_bins)-1
-    x,y,z = get_pos(dist_bins[:nD],l,b,_cyl=False)
+    x,y,z = get_pos(dist_bins[:nD],l,b,_cyl=False,Dsun=cts["Sun"].getfloat("Dsun"),zsun=cts["Sun"].getfloat("zsun"))
     xb =  x * costheta + y * sintheta
     yb = -x * sintheta + y * costheta
     
@@ -1380,7 +1386,8 @@ if __name__ == "__main__":
     rot_curve_file = cts["Basic"]["ROTCURVEfile"]
         #load rotation curve and create interpolator
     rot_curve_data = np.loadtxt(MLdirectory+rot_curve_file,delimiter=",",comments="#")
-    rotation_curve_intp = scipy.interpolate.interp1d(rot_curve_data[:,0],rot_curve_data[:,1],kind="linear",bounds_error=False,)
+    #rot_curve_data[:,0] in kiloparsecs! NEED TO CONVERT TO PARSECS 
+    rotation_curve_intp = scipy.interpolate.interp1d(rot_curve_data[:,0]*1000,rot_curve_data[:,1],kind="linear",bounds_error=False,)
         #load ML and create interpolators
     
     mass_index = cts[photsys].getint("ML_mass_offset")
