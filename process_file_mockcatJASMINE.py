@@ -16,6 +16,7 @@ import scipy.stats
 import scipy.interpolate
 import scipy.integrate
 import pandas as pd
+import os
 
 from astropy.coordinates import sky_coordinate as SkyCoord, ICRS,Galactic
 from astropy import units as u
@@ -36,28 +37,32 @@ except ImportError:
 #functions
 
 ############## BASIC FUNCTIONS #############
-def Dlb2xyz(D,lD,bD,Rsun = 8160,zsun=25,xyzSgrA = [0.00652738910230255, -7.9754527097427195, -6.551216431968028]):
+def Dlb2xyz(D,lD,bD,Dsun = 8160,zsun=25,xyzSgrA = [-0.01362815601805778, -7.941887440118567, -6.574101760251946]):
     """
-    Transform from distance and Galactic coordinates to XYZ Galactocentric cartesian coordinates.
+    Transform from distance and Galactic coordinates to XYZ Galactocentric cartesian coordinates.(LEFT HANDED!)
 
     - D: distance (any units)
     - lD: Galactic longitude (degrees)
     - bD: Galactic latitude (degrees)
-    - Rsun: Galactocentric radius value of the Sun (in pc)
+    - Dsun: Galactocentric distance to the Sun (in pc)
     - zsun: height of the Sun (pc)
     - xyzSgrA (iterable): location in XYZ Galactocentric cartesian coordinates of SgrA*.
     """
-    cosbsun = np.cos(zsun/Rsun)
-    sinbsun = np.sin(zsun/Rsun)
+    sinbsun = zsun/Dsun
+    bsun = np.arcsin(sinbsun)
+    cosbsun = np.cos(bsun)
     cosb = np.cos(np.deg2rad(bD))
     sinb = np.sin(np.deg2rad(bD))
     cosl = np.cos(np.deg2rad(lD))
     sinl = np.sin(np.deg2rad(lD))
     
-    x = Rsun - D*cosb*cosl
+    x = D*cosb*cosl
     y = D*cosb*sinl
     z = D*sinb
-    return [x - xyzSgrA[0],y - xyzSgrA[1],z*cosbsun + x*sinbsun - xyzSgrA[2]]
+    
+    x = x*cosbsun-z*sinbsun
+    z = z*cosbsun + x*sinbsun
+    return [Dsun*cosbsun - x - xyzSgrA[0],y - xyzSgrA[1],z - zsun - xyzSgrA[2]]
 
 
 
@@ -94,20 +99,20 @@ def getDmean(l,b):
 
 
     
-def get_pos(D,l,b,Rsun=8160,zsun=25,xyzSgrA = [0.00652738910230255, -7.9754527097427195, -6.551216431968028],_cyl=True):
+def get_pos(D,l,b,Dsun=8160,zsun=25,xyzSgrA = [-0.01362815601805778, -7.941887440118567, -6.574101760251946],_cyl=True):
     """
     Given a line of sight (l,b in degrees) and a distance, compute the Galactocentric distance in either cartessian or cylindrical coordinates
 
     - D: distance (any units)
     - lD: Galactic longitude (degrees)
     - bD: Galactic latitude (degrees)
-    - Rsun: Galactocentric radius value of the Sun (in pc)
+    - Dsun: Galactocentric distance to the Sun (in pc)
     - zsun: height of the Sun (pc)
     - xyzSgrA (iterable): location in XYZ Galactocentric cartesian coordinates of SgrA*.
 
     CAREFUL! Left-handed system.
     """
-    x,y,z = Dlb2xyz(D,l,b,Rsun,zsun,xyzSgrA)
+    x,y,z = Dlb2xyz(D,l,b,Dsun,zsun,xyzSgrA)
     
     if _cyl:
         return np.sqrt(x**2 + y**2),z
@@ -115,11 +120,11 @@ def get_pos(D,l,b,Rsun=8160,zsun=25,xyzSgrA = [0.00652738910230255, -7.975452709
         return x,y,z
     
 
-def transform_galcen_toIRCS(x,y,z,vx,vy,vz,Vsun_ =[11.1,248.5,7.25],Rsun_ =8.178,Zsun=0.0208,_skycoord=False):
+def transform_galcen_toIRCS(x,y,z,vx,vy,vz,Vsun_ =[11.1,248.5,7.25],Dsun_ =8.178,Zsun=0.0208,_skycoord=False):
 
     vsun = coord.CartesianDifferential(Vsun_*u.km/u.s)
     gc_frame = coord.Galactocentric(galcen_v_sun=vsun,
-                                    galcen_distance=Rsun_*u.kpc, z_sun=Zsun*u.kpc,)
+                                    galcen_distance=Dsun_*u.kpc, z_sun=Zsun*u.kpc,)
     c = coord.SkyCoord(x=x*u.pc,y=y*u.pc,z=z*u.pc,
                  v_x = vx*u.km/u.second,v_y = vy*u.km/u.second,v_z = vz*u.km/u.second,frame=gc_frame)
     cICRS = c.transform_to(coord.ICRS)
@@ -137,20 +142,10 @@ def transform_galcen_toIRCS(x,y,z,vx,vy,vz,Vsun_ =[11.1,248.5,7.25],Rsun_ =8.178
 def read_inputs():
     parser = argparse.ArgumentParser(description='Compute the distance Posterior Distribution Function from l,b,J,H,Ks,parallax.')
     
-    parser.add_argument('outfile_prefix', type=str, help='Prefix of the output file to store')
+    parser.add_argument('infile_folder', type=str, help='Name of the folder where the files to process are (.csv only for now)')
     parser.add_argument('constants_file', type=str, help='Name of the file with the constants (.ini file, like those used by AGAMA)')
-    parser.add_argument("--l",type=float,help="Galactic longitude in degrees",required=False)
-    parser.add_argument("--b",type=float,help="Galactic latitude in degrees",required=False)
-    parser.add_argument("--J",type=float,help="Aparent magnitude J",required=False)
-    parser.add_argument("--H",type=float,help="Aparent magnitude H",required=False)
-    parser.add_argument("--Ks",type=float,help="Aparent magnitude Ks",required=False)
-    parser.add_argument("--Je",type=float,help="Error in aparent magnitude J",required=False)
-    parser.add_argument("--He",type=float,help="Error in aparent magnitude H",required=False)
-    parser.add_argument("--Kse",type=float,help="Error in aparent magnitude Ks",required=False)
-    parser.add_argument("--plx",type=float,help="Parallax",required=False)
-    parser.add_argument("--plxe",type=float,help="Parallax error",required=False)
-    parser.add_argument('--infile', type=str, help='Name of the file to process (.csv or .fits)',required=False)
-    parser.add_argument('--outfile_extension', type=str, help='.csv or .fits. Default: same as input file. If not provided, then default to CSV',required=False)
+    parser.add_argument('output_folder', type=str, help='Folder where the outputs will be stored')
+    parser.add_argument('--outfile_extension', type=str, help='Extension has to be .csv or .fits for now',default=".csv")
     args = parser.parse_args()
     
     return args
@@ -172,6 +167,21 @@ def extract_lb_fromfilename(filename,glon_name="glon",glat_name="glat",sep="_"):
     return l,b
 
 
+def read_file(infile,cts):
+    data = pd.read_csv(infile)
+    l,b = extract_lb_fromfilename(infile,glon_name=cts["Basic"]["glon_colname"],glat_name=cts["Basic"]["glat_colname"],
+                                    sep=cts["Basic"]["infile_separator"])
+    return data,l,b
+
+def read_row_column_names(cts):
+    Jrow = cts["data"]["Jrow"];Hrow = cts["data"]["Hrow"];Ksrow = cts["data"]["Ksrow"]
+    Jerow = cts["data"]["Jerow"];Herow = cts["data"]["Herow"];Kserow = cts["data"]["Kserow"]
+    plxrow = cts["data"]["plxrow"];plxerow = cts["data"]["plxerow"]
+    sourceidrow = cts["data"]["sidrow"]
+    qualityrow = cts["data"]["quality_row"]
+    return sourceidrow,Jrow,Hrow,Ksrow,Jerow,Herow,Kserow,plxrow,plxerow,qualityrow
+
+
 def storefile(data,prefix,mags,l,b,sufix,fileformat,colnames):
     if fileformat.endswith(".csv"):
         header = ",".join(colnames)
@@ -191,17 +201,33 @@ def init_pool(the_int):
     global GlobalVar
     GlobalVar = the_int
 
-def initializer(_hscale,_mags_notnan,_mag_errors_notnan,_A0s_notnan,_Mags0,_EJKs,_mass_bins,_Prior_mass):
-    global hscale,mags_notnan,mag_errors_notnan,A0s_notnan,Mags0,EJKs,mass_bins,Prior_mass
+def initializer(_cts,_output_folder,_output_prefix,_fileformat,_EJK2AJ,_EJK2AH,_EJK2AKs,_dist_bins,_extmap,_components_names,_IMF_params,_interpolators,_ML,_n0MS,_bandnames,_rotation_curve_intp,_NDS_interpolators,_costheta,_sintheta,_def_mag_err,_min_mag_error,_sig_lim,_sig_cut):
 
-    mass_bins = _mass_bins
-    hscale = _hscale
-    EJKs = _EJKs
-    Prior_mass = _Prior_mass
-    mags_notnan = _mags_notnan
-    mag_errors_notnan = _mag_errors_notnan
-    A0s_notnan = _A0s_notnan
-    Mags0 = _Mags0
+    global cts,output_folder,output_prefix,fileformat,EJK2AJ,EJK2AH,EJK2AKs,dist_bins,extmap,components_names,IMF_params,interpolators,ML,n0MS,bandnames,rotation_curve_intp,NDS_interpolators,costheta,sintheta,def_mag_err,min_mag_error,sig_lim,sig_cut
+
+    cts = _cts
+    output_folder = _output_folder
+    output_prefix = _output_prefix
+    fileformat = _fileformat
+    EJK2AJ = _EJK2AJ
+    EJK2AH = _EJK2AH
+    EJK2AKs = _EJK2AKs
+    dist_bins = _dist_bins
+    extmap = _extmap
+    components_names = _components_names
+    IMF_params = _IMF_params
+    interpolators = _interpolators
+    ML = _ML
+    n0MS = _n0MS
+    bandnames = _bandnames
+    rotation_curve_intp = _rotation_curve_intp
+    NDS_interpolators = _NDS_interpolators
+    costheta = _costheta
+    sintheta = _sintheta
+    def_mag_err = _def_mag_err
+    min_mag_error = _min_mag_error
+    sig_lim = _sig_lim
+    sig_cut = _sig_cut
 
 
 ############## DENSITY PROFILES #############
@@ -401,11 +427,24 @@ def NSD_rho(xb,yb,zb,params):
     except:
         print("Using default value for C1ND.")
         C1ND=2
+    try:
+        RNSDlim = float(params["RNSDlim"])
+    except:
+        print("Using default value for RNSDlim.")
+        RNSDlim=1000
+    try:
+        zNSDlim = float(params["zNSDlim"])
+    except:
+        print("Using default value for zNSDlim.")
+        zNSDlim=400
+    R = np.sqrt(xb**2 + yb**2)
     xn = np.abs(xb/x0ND)
     yn = np.abs(yb/y0ND)
     zn = np.abs(zb/z0ND)
     rs = (xn**C1ND + yn**C1ND)**(1/C1ND) + zn
-    return np.exp(-rs)
+    rho = np.zeros_like(R)
+    rho[(R<RNSDlim)&(np.abs(zb)<zNSDlim)] = np.exp(-rs[(R<RNSDlim)&(np.abs(zb)<zNSDlim)])
+    return rho
 
 def NSC_rho(R,z,params):
     """
@@ -601,6 +640,8 @@ def get_integral_PJHKsmass(dist_bins,hscale,mags_notnan,mag_errors_notnan,A0s_no
     - Mags0: Absolute magnitudes in all bands at distance D for all masses (mag)
     - EJKs: Extinction in J-Ks (mag)
     """
+    #TO-DO: FOR NSD, probability should be 0 at distances that produce R,z combinations outside the range of the moments array (The prior should take care that the likelihood of that is very small, but it will never be nul, and that would produce an error)
+
     probs = []
     for icomp_,MLi in enumerate(ML):
         prob = np.zeros_like(dist_bins)
@@ -892,7 +933,7 @@ def get_velProbBar(R,x,y,z,costheta,sintheta,Omega_p=47.4105844018699,y0_str=406
     xb =  x * costheta + y * sintheta
     yb = -x * sintheta + y * costheta
     zb = z
-    vrot = 0.001 * Omega_p * np.sqrt(R)
+    vrot = 0.001 * Omega_p * R
     sigvbs = calc_sigvb(xb, yb, zb,x0_vb,y0_vb,z0_vb,C1_vb,C2_vb,C3_vb,x0_vbz,
                         y0_vbz,z0_vbz,C1_vbz,C2_vbz,C3_vbz,sigx_vb,sigx_vb0,sigy_vb,
                sigy_vb0,sigz_vb,sigz_vb0,model_vb,model_vbz)
@@ -925,15 +966,16 @@ def get_velProbNSD(R,z,vphi_interpol,sigvphi_interpol,sigvr_interpol,sigvz_inter
     
 
 def get_velProbNSC(r,sigvx0,sigvy0,sigvz0):
+    #TO-DO: add proper model -> Check Sormani+2022 and Chatzopoulos et al. 2015 (df = f(E,Lz) => get moments)
     sigxv = sigvx0*np.exp(-r)
     sigvy = sigvy0*np.exp(-r)
     sigvz = sigvz0*np.exp(-r)
     return scipy.stats.multivariate_normal(mean=[0,0,0],cov=np.diag([sigxv,sigvy,sigvz])**2)
 
 
-def sample_velocities(icomp,D,lD,bD,params,Rsun = 8160,zsun=25,xyzSgrA = [0.00652738910230255, -7.9754527097427195, -6.551216431968028], nsamp = 1, dRg = 10):
+def sample_velocities(icomp,D,lD,bD,params,Dsun = 8160,zsun=25,xyzSgrA = [-0.01362815601805778, -7.941887440118567, -6.574101760251946], nsamp = 1, dRg = 10):
     """
-    CAREFUL! Dlb2xyz is a LEFT-HANDED SYSTEM! The output is in a right handed system where the Sun is at x<0 and y>0 towards l>0.
+    CAREFUL! Dlb2xyz is a LEFT-HANDED SYSTEM! The output is in a right handed system where the Sun is at x>0, and y<0 towards l>0.
     For disc kinematics:
     dRg=10,rot_curve,R0,tau,betaU,sigU0,hsigU,betaW,sigW0,hsigW,Rd,
 
@@ -946,7 +988,7 @@ def sample_velocities(icomp,D,lD,bD,params,Rsun = 8160,zsun=25,xyzSgrA = [0.0065
     For NSC kinematics:
     sigvx0_nsc=200,sigvy0_nsc=200,sigvz0_nsc=200
     """
-    x,y,z = Dlb2xyz(D,lD,bD,Rsun,zsun,xyzSgrA)
+    x,y,z = Dlb2xyz(D,lD,bD,Dsun,zsun,xyzSgrA)
 
     R = np.sqrt(x**2 + y**2)
     if icomp<8:
@@ -1017,7 +1059,7 @@ def sample_velocities(icomp,D,lD,bD,params,Rsun = 8160,zsun=25,xyzSgrA = [0.0065
         sigvz_interpol = params["sigvz_interpol"]
         vrvzcorr_interpol = params["vrvzcorr_interpol"]
         #create PDF
-        gauss = get_velProbNSD(R,z,vphi_interpol,sigvphi_interpol,sigvr_interpol,sigvz_interpol,vrvzcorr_interpol)
+        gauss = get_velProbNSD(R,np.abs(z),vphi_interpol,sigvphi_interpol,sigvr_interpol,sigvz_interpol,vrvzcorr_interpol)
         #sample　PDF
         vr,vphi,vz = sample_normal(gauss,nsamp)
         #convert cylindrical to cartesian
@@ -1093,7 +1135,7 @@ def process_row(row,mags_notnan,mag_errors_notnan,A0s_notnan,interpol_indices,ML
 
 
 
-def prepare_observables(mags,mag_errors,bandnames,def_mag_err,min_mag_error):
+def prepare_observables(mags,mag_errors,A0s,bandnames,def_mag_err,min_mag_error):
     mags_notnan = []
     mag_errors_notnan = []
     A0s_notnan = []
@@ -1116,7 +1158,7 @@ def prepare_observables(mags,mag_errors,bandnames,def_mag_err,min_mag_error):
                 indices.append(i)
     return np.array(mags_notnan),np.array(mag_errors_notnan),np.array(A0s_notnan),np.array(indices)
     
-def mapper(row,l,b,Jrow,Hrow,Ksrow,Jerow,Herow,Kserow,plxrow,plxerow,A0s,interpolators,ML,mass_bins,dist_bins,hscale,EJKs,PD,n0MS,bandnames,outfile_prefix,fileformat,params_all,IMF_params,rotation_curve,NDS_interpolators,components_names,def_mag_err=0.2,min_mag_error=0.05,sig_lim=10,sig_cut=0):
+def mapper(row,l,b,sourceidrow,Jrow,Hrow,Ksrow,Jerow,Herow,Kserow,plxrow,plxerow,qualityrow,A0s,interpolators,ML,dist_bins,hscale,EJKs,PD,n0MS,bandnames,output_prefix,fileformat,params_all,IMF_params,rotation_curve,NDS_interpolators,components_names,def_mag_err=0.2,min_mag_error=0.05,sig_lim=10,sig_cut=0):
     """
     l,b in degrees
     - mags: ALWAYS J, H and Ks in that order [mag]. They can be None.
@@ -1135,7 +1177,7 @@ def mapper(row,l,b,Jrow,Hrow,Ksrow,Jerow,Herow,Kserow,plxrow,plxerow,A0s,interpo
     J = row[Jrow];H = row[Hrow];Ks = row[Ksrow]
     Jerror = row[Jerow];Herror = row[Herow];Kserror = row[Kserow]
     
-    if plxrow != "none":
+    if (plxrow != "none") and (row[qualityrow] <= params_all["data"].getfloat("quality_cut")):
         plx = row[plxrow]
         plxerror = row[plxerow]
     else:
@@ -1147,12 +1189,19 @@ def mapper(row,l,b,Jrow,Hrow,Ksrow,Jerow,Herow,Kserow,plxrow,plxerow,A0s,interpo
     elif (plx is None or np.isnan(plx)):
         plx = None
         plxerror = None
+
+
+    extrasidrow = params_all["data"]["extra_sourceid"]
+    if row[extrasidrow] is None or np.isnan(row[extrasidrow]):
+       identity = sourceidrow+f"{int(row[sourceidrow])}"
+    else:
+        identity = sourceidrow+f"{int(row[sourceidrow])}_"+extrasidrow+f"{int(row[extrasidrow])}"
             
     mags = [J,H,Ks]
     mag_errors = [Jerror,Herror,Kserror]
         #select onle those with a valid value
             #interpol_indices: list of either 1, 2 or 3 values, corresponding to the indices of the magnitudes used (0=J,1=H,2=Ks)
-    mags_notnan,mag_errors_notnan,A0s_notnan,interpol_indices = prepare_observables(mags,mag_errors,bandnames,def_mag_err,min_mag_error)
+    mags_notnan,mag_errors_notnan,A0s_notnan,interpol_indices = prepare_observables(mags,mag_errors,A0s,bandnames,def_mag_err,min_mag_error)
 
     ML_indices = interpol_indices + ML_mag_offset
     sigma_indices = interpol_indices + ML_sig_offset
@@ -1164,7 +1213,7 @@ def mapper(row,l,b,Jrow,Hrow,Ksrow,Jerow,Herow,Kserow,plxrow,plxerow,A0s,interpo
     post = process_row(row,mags_notnan,mag_errors_notnan,A0s_notnan,interpol_indices,ML_indices,plx,plxerror,interpolators,ML,dist_bins[:nD],hscale,EJKs,IMF_params,PD,n0MS,components_names,sig_lim,sig_cut,sigma_indices,max_indices,mass_index)
     #store
     storefile(np.vstack(((dist_bins[:nD]).T,np.array(post))).T,
-      outfile_prefix,used_mags_names,l,b,int(row[sourceidrow]),fileformat,["dist"]+components_names)
+      output_prefix,used_mags_names,l,b,identity,fileformat,["dist"]+components_names)
     #sample
         #sample component
     icomp_rnd = sample_component_from_distPosterior(post,dist_bins[:nD])
@@ -1182,11 +1231,70 @@ def mapper(row,l,b,Jrow,Hrow,Ksrow,Jerow,Herow,Kserow,plxrow,plxerow,A0s,interpo
         params = NDS_interpolators
     if icomp_rnd < 8:
         params["rot_curve"] = rotation_curve
-    x,y,z,vx,vy,vz = sample_velocities(icomp_rnd,D_rnd,l,b,params)
+
+    try:
+        x,y,z,vx,vy,vz = sample_velocities(icomp_rnd,D_rnd,l,b,params,Dsun=params_all["Sun"].getfloat("Dsun"),zsun=params_all["Sun"].getfloat("zsun"),xyzSgrA=[params_all["Sun"].getfloat("xSgrA"),params_all["Sun"].getfloat("ySgrA"), params_all["Sun"].getfloat("zSgrA")])
+    except Exception as e:
+        print(f"Failed to sample velocities for star {row[sourceidrow]}. Setting values to NaN")
+        print(e)
+        x = np.nan; y = np.nan; z = np.nan
+        vx = np.nan; vy = np.nan; vz = np.nan
+
 
     return icomp_rnd,D_rnd,mass_rnd,mj_rnd,mh_rnd,mks_ran,x,y,z,vx,vy,vz
 
+def process_line_of_sight(infile):
+    """
+    Variables provided by Global:
+    cts,output_folder,output_prefix,fileformat,EJK2AJ,EJK2AH,EJK2AKs,dist_bins,extmap,components_names,IMF_params,interpolators,ML,n0MS,bandnames,rotation_curve_intp,NDS_interpolators,costheta,sintheta,def_mag_err,min_mag_error,sig_lim,sig_cut
+    """
+    #For this line of sight
 
+        #load data
+    stars,l,b = read_file(infile,cts)
+    sourceidrow,Jrow,Hrow,Ksrow,Jerow,Herow,Kserow,plxrow,plxerow,qualityrow = read_row_column_names(cts)
+
+    mock_name = output_folder + cts["Basic"]["output_filename"]+"_"+cts["Basic"]["glon_colname"]+f"{l}_"+cts["Basic"]["glat_colname"]+f"{b}.csv"
+    
+        #compute some constants
+    Dmean = getDmean(l,b)
+    hscale = getHscale(b)
+    A0J = EJK2AJ/(1 - np.exp(-Dmean/hscale))
+    A0H = EJK2AH/(1 - np.exp(-Dmean/hscale))
+    A0Ks = EJK2AKs/(1 - np.exp(-Dmean/hscale))
+    A0s = [A0J,A0H,A0Ks]
+    
+    nD = len(dist_bins)-1
+    x,y,z = get_pos(dist_bins[:nD],l,b,_cyl=False,Dsun=cts["Sun"].getfloat("Dsun"),zsun=cts["Sun"].getfloat("zsun"))
+    xb =  x * costheta + y * sintheta
+    yb = -x * sintheta + y * costheta
+    
+        #read extinction map
+    EJKs =  extmap[np.argmin(np.sqrt((extmap[:,0]-l)**2+(extmap[:,1]-b)**2))][-1]
+    
+        #compute priors
+            #distance
+    PD = []
+    for icomp,name in enumerate(components_names):
+        if icomp<=7:
+            PD.append(prior_dist(dist_bins[:nD],x,y,z,icomp,dict(cts[name])))
+        else:
+            PD.append(prior_dist(dist_bins[:nD],xb,yb,z,icomp,dict(cts[name])))
+            #no need to normalise the prior
+    #norms = [scipy.integrate.simpson(aux,dist_bins) for aux in PD]
+    #PDnorm = [aux/norms[i] for i,aux in enumerate(PD)]
+    
+    
+    mock_sources = []
+    for index, row in stars.iterrows():
+        #iterate through each source in the dataframe provided
+        aux = mapper(row,l,b,sourceidrow,Jrow,Hrow,Ksrow,Jerow,Herow,Kserow,plxrow,plxerow,qualityrow,A0s,interpolators,ML,dist_bins,hscale,EJKs,PD,n0MS,bandnames,output_prefix,fileformat,cts,IMF_params,rotation_curve_intp,NDS_interpolators,components_names,def_mag_err,min_mag_error,sig_lim,sig_cut)
+        mock_sources.append([int(row[sourceidrow])]+list(aux))
+    #store the mock sources created
+    mock_sources = np.array(mock_sources) 
+    np.savetxt(mock_name,mock_sources,delimiter=cts["Basic"]["separator"],header="source_id,icomp,D,mass,mj,mh,mks,x,y,z,vx,vy,vz",fmt=['%d','%d']+['%.3e']*(len(aux)-1))
+
+    return None
 
 ### RUN CODE ###
 
@@ -1215,35 +1323,14 @@ if __name__ == "__main__":
     nproc = cts["Basic"].getint("nprocs")
 
     #prepare inputs
-    if args.infile is None:
-        l = args.l
-        b = args.b
-        J = args.J
-        H = args.H
-        Ks = args.Ks
-        plx = args.plx
-        Jerror = args.Je
-        Herror = args.He
-        Kserror = args.Kse
-        plxerror = args.plxe
-        if args.outfile_extension is None:
-            fileformat = ".csv"
-        else:
-            fileformat = args.outfile_extension
-        
-    else:
-        #load input file
-        stars = pd.read_csv(args.infile)
-        l,b = extract_lb_fromfilename(args.infile,glon_name=cts["Basic"]["glon_colname"],glat_name=cts["Basic"]["glat_colname"],
-                                      sep=cts["Basic"]["infile_separator"])
-        Jrow = cts["data"]["Jrow"];Hrow = cts["data"]["Hrow"];Ksrow = cts["data"]["Ksrow"]
-        Jerow = cts["data"]["Jerow"];Herow = cts["data"]["Herow"];Kserow = cts["data"]["Kserow"]
-        plxrow = cts["data"]["plxrow"];plxerow = cts["data"]["plxerow"]
-        sourceidrow = cts["data"]["sidrow"]
-        if args.outfile_extension is None:
-            fileformat = "."+args.infile.split(".")[-1]
-        else:
-            fileformat = args.outfile_extension
+        #load input folder
+    data_folder = args.infile_folder
+    fileformat = args.outfile_extension
+    output_folder = args.output_folder
+    output_prefix = output_folder + cts["Basic"]["output_prefix"]
+
+        #look for all files containing the right keywords
+    filelist = [data_folder+f for f in os.listdir(data_folder) if all(keywords in f for keywords in [cts["Basic"]["glon_colname"],cts["Basic"]["glat_colname"]])]
             
     
         #dump constants into variables
@@ -1265,6 +1352,9 @@ if __name__ == "__main__":
     Mu = cts["IMF"].getfloat("Mass_max") #max mass
     Ml = cts["IMF"].getfloat("Mass_min") #min mass
     nM = cts["IMF"].getint("num_bins_M")
+    IMF_params = {"Mu":Mu,"Ml":Ml,"M1":cts["IMF"].getfloat("M1"),"M2":cts["IMF"].getfloat("M2"),
+                     "alpha1":cts["IMF"].getfloat("alpha1"),"alpha2":cts["IMF"].getfloat("alpha2"),"alpha3":cts["IMF"].getfloat("alpha3"),"norm":cts["IMF"].getfloat("norm")}
+
     Dmax = cts["Basic"].getfloat("Dmax") #max distance in pc
     Dmin = cts["Basic"].getfloat("Dmin") #min distance in pc
     nD = cts["Basic"].getint("num_bins_D")
@@ -1296,7 +1386,8 @@ if __name__ == "__main__":
     rot_curve_file = cts["Basic"]["ROTCURVEfile"]
         #load rotation curve and create interpolator
     rot_curve_data = np.loadtxt(MLdirectory+rot_curve_file,delimiter=",",comments="#")
-    rotation_curve_intp = scipy.interpolate.interp1d(rot_curve_data[:,0],rot_curve_data[:,1],kind="linear",bounds_error=False,)
+    #rot_curve_data[:,0] in kiloparsecs! NEED TO CONVERT TO PARSECS 
+    rotation_curve_intp = scipy.interpolate.interp1d(rot_curve_data[:,0]*1000,rot_curve_data[:,1],kind="linear",bounds_error=False,)
         #load ML and create interpolators
     
     mass_index = cts[photsys].getint("ML_mass_offset")
@@ -1336,59 +1427,16 @@ if __name__ == "__main__":
     
     #define distance binning
     dist_bins = np.logspace(np.log10(Dmin),np.log10(Dmax),nD+1)
-    #define mass binning
-    mass_bins = np.logspace(np.log10(Ml),np.log10(Mu+5),nM)
+    #define mass binning (NOT USED)
+    #mass_bins = np.logspace(np.log10(Ml),np.log10(Mu+5),nM)
     
+    print("Finished loading all the parameters.")
+
+    print(f"Starting to process all {len(filelist)} files.")
+
+
+    with pool.Pool(nproc,initializer,(cts,output_folder,output_prefix,fileformat,EJK2AJ,EJK2AH,EJK2AKs,dist_bins,extmap,components_names,IMF_params,interpolators,ML,n0MS,bandnames,rotation_curve_intp,NDS_interpolators,costheta,sintheta,def_mag_err,min_mag_error,sig_lim,sig_cut)) as p:
+                int_PJHKsmass_d = p.map(process_line_of_sight,filelist)
+              
     
-    #For this line of sight
-        #compute some constants
-    Dmean = getDmean(l,b)
-    hscale = getHscale(b)
-    A0J = EJK2AJ/(1 - np.exp(-Dmean/hscale))
-    A0H = EJK2AH/(1 - np.exp(-Dmean/hscale))
-    A0Ks = EJK2AKs/(1 - np.exp(-Dmean/hscale))
-    A0s = [A0J,A0H,A0Ks]
-    
-    x,y,z = get_pos(dist_bins[:nD],l,b,_cyl=False)
-    xb =  x * costheta + y * sintheta
-    yb = -x * sintheta + y * costheta
-    
-        #read extinction map
-    EJKs =  extmap[np.argmin(np.sqrt((extmap[:,0]-l)**2+(extmap[:,1]-b)**2))][-1]
-    print(l,b,EJKs)
-    
-        #compute priors
-            #distance
-    PD = []
-    for icomp,name in enumerate(components_names):
-        if icomp<=7:
-            PD.append(prior_dist(dist_bins[:nD],x,y,z,icomp,dict(cts[name])))
-        else:
-            PD.append(prior_dist(dist_bins[:nD],xb,yb,z,icomp,dict(cts[name])))
-            #no need to normalise the prior
-    #norms = [scipy.integrate.simpson(aux,dist_bins) for aux in PD]
-    #PDnorm = [aux/norms[i] for i,aux in enumerate(PD)]
-    
-            #mass
-    IMF_params = {"Mu":Mu,"Ml":Ml,"M1":cts["IMF"].getfloat("M1"),"M2":cts["IMF"].getfloat("M2"),
-                     "alpha1":cts["IMF"].getfloat("alpha1"),"alpha2":cts["IMF"].getfloat("alpha2"),"alpha3":cts["IMF"].getfloat("alpha3"),"norm":cts["IMF"].getfloat("norm")}
-    
-    
-    if args.infile is None:
-        if plx is not None and plxerror is None:
-            raise ValueError("If the parallax is provided, the error must also be provided!")
-        
-        mags_notnan,mag_errors_notnan,A0s_notnan,interpol_indices = prepare_observables([J,H,Ks],[Jerror,Herror,Kserror],bandnames,def_mag_err,min_mag_error)
-        post = compute_posterior(mags_notnan,mag_errors_notnan,A0s_notnan,interpol_indices,interpol_indices + ML_mag_offset,plx,plxerror,interpolators,ML,dist_bins,hscale,EJKs,IMF_params,PD,n0MS,sig_lim,sig_cut,interpol_indices + ML_sig_offset)
-        storefile(np.vstack(((dist_bins[:nD]).T,np.array(post))).T,args.outfile_prefix,"_",l,b,-1,fileformat,["dist"]+components_names)
-    else:
-        mock_sources = []
-        for index, row in stars.iterrows():
-            #iterate through each source in the dataframe provided
-            aux = mapper(row,l,b,Jrow,Hrow,Ksrow,Jerow,Herow,Kserow,plxrow,plxerow,A0s,interpolators,ML,mass_bins,dist_bins,hscale,EJKs,PD,n0MS,bandnames,args.outfile_prefix,fileformat,cts,IMF_params,rotation_curve_intp,NDS_interpolators,components_names,def_mag_err,min_mag_error,sig_lim,sig_cut)
-            mock_sources.append([int(row[sourceidrow])]+list(aux))
-        #store the mock sources created
-        mock_sources = np.array(mock_sources) 
-        np.savetxt(cts["Basic"]["outputfile"],mock_sources,delimiter=cts["Basic"]["separator"],header="source_id,icomp,D,mass,mj,mh,mks,x,y,z,vx,vy,vz",fmt=['%d','%d']+['%.3e']*(len(aux)-1))          
-    
-        print(f"Finished processing file {args.infile}. It took {time.time()-tstart} seconds")
+    print(f"Finished processing. It took {time.time()-tstart} seconds")
