@@ -736,7 +736,6 @@ def samplemass(mags_notnan,mag_errors_notnan,D,A0s_notnan,EJKs,hscale,interpolat
         #discard the last value of the mass (it should be above 120Msun anyway, so it should not affect)
     mass_cdf= np.cumsum(Postmass[:-1]*(mass_bins[1:]-mass_bins[:-1]))
     mass_cdf/=mass_cdf[-1]
-
     #Generate random 0-1 number
     u = np.random.uniform(0,1)
 
