@@ -1188,6 +1188,8 @@ def mapper(row,l,b,sourceidrow,Jrow,Hrow,Ksrow,Jerow,Herow,Kserow,plxrow,plxerow
     ML_max_offset = params_all[params_all["Basic"]["photsys"]].getint("ML_max_offset")
     #prepare observables
         #unpack pandas row
+    lrow = params_all["data"]["lrow"]; l_data = row[lrow]
+    brow = params_all["data"]["lrow"]; b_data = row[brow]
     J = row[Jrow];H = row[Hrow];Ks = row[Ksrow]
     Jerror = row[Jerow];Herror = row[Herow];Kserror = row[Kserow]
     
@@ -1226,7 +1228,7 @@ def mapper(row,l,b,sourceidrow,Jrow,Hrow,Ksrow,Jerow,Herow,Kserow,plxrow,plxerow
     #compute posterior
     post = process_row(row,mags_notnan,mag_errors_notnan,A0s_notnan,interpol_indices,ML_indices,plx,plxerror,interpolators,ML,dist_bins[:nD],hscale,EJKs,IMF_params,PD,n0MS,components_names,sig_lim,sig_cut,sigma_indices,max_indices,mass_index)
     #store
-    storefile(np.array(post),output_prefix,mags,l,b,plx,identity,fileformat,components_names,bandnames,params_all["data"]["lrow"],params_all["data"]["brow"],plxrow)
+    storefile(np.array(post),output_prefix,mags,l_data,b_data,plx,identity,fileformat,components_names,bandnames,lrow,brow,plxrow)
     #sample
         #sample component
     icomp_rnd = sample_component_from_distPosterior(post,dist_bins[:nD])
