@@ -145,7 +145,7 @@ def read_inputs():
     parser.add_argument('infile_folder', type=str, help='Name of the folder where the files to process are (.csv only for now)')
     parser.add_argument('constants_file', type=str, help='Name of the file with the constants (.ini file, like those used by AGAMA)')
     parser.add_argument('output_folder', type=str, help='Folder where the outputs will be stored')
-    parser.add_argument('--outfile_extension', type=str, help='Extension has to be .csv or .fits for now',default=".csv")
+    parser.add_argument('--outfile_extension', type=str, help='Extension has to be .npz, .csv or .fits for now',default=".npz")
     args = parser.parse_args()
     
     return args
@@ -182,13 +182,28 @@ def read_row_column_names(cts):
     return sourceidrow,Jrow,Hrow,Ksrow,Jerow,Herow,Kserow,plxrow,plxerow,qualityrow
 
 
-def storefile(data,prefix,mags,l,b,sufix,fileformat,colnames):
-    if fileformat.endswith(".csv"):
+def storefile(data,prefix,mags,l,b,parallax,sufix,fileformat,colnames,bandnames,glon_colname,glat_colname,plx_colname):
+    filename = "{}_{}{}_{}{}_{}{}_{}{}_{}{}_{}{}_{}_{}".format(prefix,bandnames[0],mags[0],
+                                                                   bandnames[1],mags[1],
+                                                                   bandnames[2],mags[2],
+                                                                   glon_colname,l,
+                                                                   glat_colname,b,
+                                                                   plx_colname,parallax,
+                                                                   sufix,fileformat)
+    
+    if fileformat.endswith(".npz"):
+        data_sparse = scipy.sparse.csc_matrix(data)
+        np.savez_compressed(filename,
+                    data=data_sparse.data,
+                    indices=data_sparse.indices,
+                    indptr=data_sparse.indptr,
+                    shape=data_sparse.shape)
+    elif fileformat.endswith(".csv"):
         header = ",".join(colnames)
-        np.savetxt("{}_{}_{}_{}_{}_{}".format(prefix,mags,l,b,sufix,fileformat),data,delimiter=",",header=header)
+        np.savetxt(filename,data,delimiter=",",header=header)
     elif fileformat.endswith(".fits"):
         t = Table(data,names = colnames,dtype=float)
-        t.write("{}_{}_{}_{}_{}_{}".format(prefix,mags,l,b,sufix,fileformat))
+        t.write(filename)
     else:
         raise ValueError("Unrecognized output file extension!")
         
@@ -1211,8 +1226,7 @@ def mapper(row,l,b,sourceidrow,Jrow,Hrow,Ksrow,Jerow,Herow,Kserow,plxrow,plxerow
     #compute posterior
     post = process_row(row,mags_notnan,mag_errors_notnan,A0s_notnan,interpol_indices,ML_indices,plx,plxerror,interpolators,ML,dist_bins[:nD],hscale,EJKs,IMF_params,PD,n0MS,components_names,sig_lim,sig_cut,sigma_indices,max_indices,mass_index)
     #store
-    storefile(np.vstack(((dist_bins[:nD]).T,np.array(post))).T,
-      output_prefix,used_mags_names,l,b,identity,fileformat,["dist"]+components_names)
+    storefile(np.array(post),output_prefix,mags,l,b,plx,identity,fileformat,components_names,bandnames,params_all["data"]["lrow"],params_all["data"]["brow"],plxrow)
     #sample
         #sample component
     icomp_rnd = sample_component_from_distPosterior(post,dist_bins[:nD])
