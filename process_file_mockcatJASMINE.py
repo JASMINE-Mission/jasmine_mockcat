@@ -663,15 +663,17 @@ def get_integral_PJHKsmass(dist_bins,hscale,mags_notnan,mag_errors_notnan,A0s_no
         #To-Do: check if it works with only one magnitude
         dist_std = get_gaussian_distance(mags_notnan,mag_errors_notnan,dist_bins,MLi,ML_indices,sigma_indices,max_indices,hscale,EJKs,A0s_notnan)
         
-        #B) Find points where distance is smaller than 6sigmas
+        #B) Find points where distance is smaller than N-sigmas
         close_HRd_mask = dist_std<sig_lim
         close_HRd_mask_m = np.sum(close_HRd_mask,axis=1)
-        #C.1) If there are NO points within N-sigma, simply ignore it
-        #C.2) If there is only 1 point within N-sigma, then just integrate within 90% and 110% of the closest mass
-        #C.3) Otherwise, numerically integrate within mass range (smallest and largest mass that are within 6sigma of observable)
+        #C) Compute the likelihood
+        ## C.1) If there are NO points within N-sigma, simply ignore it
+        ## C.2) If there is only 1 point within N-sigma, then just integrate within 90% and 110% of the closest mass
+        ## C.3) Otherwise, numerically integrate within mass range (smallest and largest mass that are within 6sigma of observable)
+        mask = close_HRd_mask_m>sig_cut
         prob_aux = []
-        for i,D in enumerate(dist_bins[close_HRd_mask_m>sig_cut]):
-            mass_aux = MLi[close_HRd_mask[close_HRd_mask_m>sig_cut][i]]
+        for i,D in enumerate(dist_bins[mask]):
+            mass_aux = MLi[close_HRd_mask[mask][i]]
             if len(mass_aux)==1:
                 min_mass = mass_aux[0][mass_index]*0.9
                 max_mass = mass_aux[0][mass_index]*1.1
@@ -687,8 +689,8 @@ def get_integral_PJHKsmass(dist_bins,hscale,mags_notnan,mag_errors_notnan,A0s_no
                 #multiply by mass prior
             PJHKsmass_d = L_JHKs_massd_lite*Prior_mass
                 #marginalise over the mass by integrating
-            prob_aux.append(scipy.integrate.simpson(PJHKsmass_d,mass_bins_lite))
-        prob[close_HRd_mask_m>sig_cut] = prob_aux
+            prob_aux.append(scipy.integrate.simpson(y=PJHKsmass_d,x=mass_bins_lite))
+        prob[mask] = prob_aux
         probs.append(prob)
     return np.array(probs)
 
@@ -698,7 +700,7 @@ def get_integral_PJHKsmass(dist_bins,hscale,mags_notnan,mag_errors_notnan,A0s_no
 def sample_component_from_distPosterior(Posts,dist_bins):
 
     #compute number of stars in each component
-    Post_dist_norm = np.nan_to_num([scipy.integrate.simpson(Pi,dist_bins) for icomp,Pi in enumerate(Posts)])
+    Post_dist_norm = np.nan_to_num(np.array([scipy.integrate.simpson(y=Pi,x=dist_bins) for icomp,Pi in enumerate(Posts)]))
 
     ##B) Compute CDF
     component_cdf = np.cumsum(Post_dist_norm/np.sum(Post_dist_norm))
@@ -875,7 +877,7 @@ def calc_SigRg(Rg, hsigU, rd, a0,k = 31.53, a = 0.6719, b = 0.2743,
 
 
 def get_vphiCDF(PRgR,vphi):
-    Prob_vphi = PRgR/scipy.integrate.simpson(PRgR,vphi)
+    Prob_vphi = PRgR/scipy.integrate.simpson(y=PRgR,x=vphi)
     cumProb_vphi = np.cumsum(Prob_vphi)
     cumProb_vphi/= cumProb_vphi[-1]
     return cumProb_vphi
@@ -1120,13 +1122,13 @@ def compute_posterior(mags_notnan,mag_errors_notnan,A0s_notnan,interpol_indices,
             #if probability is 0 always, then skip the normalization
             PJHKsmass_d_norms.append(aux1)
             continue
-        norm = aux1/scipy.integrate.simpson(aux1,dist_bins)
+        norm = aux1/scipy.integrate.simpson(y=aux1,x=dist_bins)
         PJHKsmass_d_norms.append(norm)
             #compute likelihood of parallax
     if plx is not None:
         #use distance in kpc because parallax is in mas
         L_plx = scipy.stats.norm.pdf(1000/dist_bins,loc=plx,scale=plx_error)
-        normPlx = scipy.integrate.simpson(L_plx,dist_bins)
+        normPlx = scipy.integrate.simpson(y=L_plx,x=dist_bins)
         Pplx_d_norm = L_plx/normPlx
     else:
         Pplx_d_norm = 1
@@ -1172,7 +1174,7 @@ def prepare_observables(mags,mag_errors,A0s,bandnames,def_mag_err,min_mag_error)
                 indices.append(i)
     return np.array(mags_notnan),np.array(mag_errors_notnan),np.array(A0s_notnan),np.array(indices)
     
-def mapper(row,l,b,sourceidrow,Jrow,Hrow,Ksrow,Jerow,Herow,Kserow,plxrow,plxerow,qualityrow,A0s,interpolators,ML,dist_bins,hscale,EJKs,PD,n0MS,bandnames,output_prefix,fileformat,params_all,IMF_params,rotation_curve,NDS_interpolators,components_names,def_mag_err=0.2,min_mag_error=0.05,sig_lim=10,sig_cut=0):
+def mapper(row,l,b,sourceidrow,Jrow,Hrow,Ksrow,Jerow,Herow,Kserow,plxrow,plxerow,qualityrow,A0s,interpolators,ML,dist_bins,hscale,EJKs,PD,n0MS,bandnames,output_prefix,fileformat,params_all,IMF_params,rotation_curve,NDS_interpolators,components_names,def_mag_err=0.2,min_mag_error=0.05,sig_lim=10,sig_cut=0,_store_posteriors=False):
     """
     l,b in degrees
     - mags: ALWAYS J, H and Ks in that order [mag]. They can be None.
@@ -1228,7 +1230,8 @@ def mapper(row,l,b,sourceidrow,Jrow,Hrow,Ksrow,Jerow,Herow,Kserow,plxrow,plxerow
     #compute posterior
     post = process_row(row,mags_notnan,mag_errors_notnan,A0s_notnan,interpol_indices,ML_indices,plx,plxerror,interpolators,ML,dist_bins[:nD],hscale,EJKs,IMF_params,PD,n0MS,components_names,sig_lim,sig_cut,sigma_indices,max_indices,mass_index)
     #store
-    storefile(np.array(post),output_prefix,mags,l_data,b_data,plx,identity,fileformat,components_names,bandnames,lrow,brow,plxrow)
+    if _store_posteriors:
+        storefile(np.array(post),output_prefix,mags,l_data,b_data,plx,identity,fileformat,components_names,bandnames,lrow,brow,plxrow)
     #sample
         #sample component
     icomp_rnd = sample_component_from_distPosterior(post,dist_bins[:nD])
