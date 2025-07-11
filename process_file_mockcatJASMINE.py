@@ -28,10 +28,7 @@ from functools import partial
 from multiprocessing import pool
 import argparse
 
-try:
-    from ConfigParser import RawConfigParser  # python 2
-except ImportError:
-    from configparser import RawConfigParser  # python 3
+from configparser import RawConfigParser  # python 3
 
 
 #functions
@@ -118,24 +115,6 @@ def get_pos(D,l,b,Dsun=8160,zsun=25,xyzSgrA = [-0.01362815601805778, -7.94188744
         return np.sqrt(x**2 + y**2),z
     else:
         return x,y,z
-    
-
-def transform_galcen_toIRCS(x,y,z,vx,vy,vz,Vsun_ =[11.1,248.5,7.25],Dsun_ =8.178,Zsun=0.0208,_skycoord=False):
-
-    vsun = coord.CartesianDifferential(Vsun_*u.km/u.s)
-    gc_frame = coord.Galactocentric(galcen_v_sun=vsun,
-                                    galcen_distance=Dsun_*u.kpc, z_sun=Zsun*u.kpc,)
-    c = coord.SkyCoord(x=x*u.pc,y=y*u.pc,z=z*u.pc,
-                 v_x = vx*u.km/u.second,v_y = vy*u.km/u.second,v_z = vz*u.km/u.second,frame=gc_frame)
-    cICRS = c.transform_to(coord.ICRS)
-    pmra = cICRS.pm_ra_cosdec.value
-    pmdec = cICRS.pm_dec.value
-    vlos = cICRS.radial_velocity.value
-
-    if _skycoord:
-        return c
-    else:
-        return pmra,pmdec,vlos
     
 
 ############## INPUTS AND OUTPUTS #############
@@ -641,7 +620,7 @@ def get_likelihood(mags_notnan,mag_errors_notnan,mass,D,interpolator,interpol_in
     DM = 5 * np.log10(0.1*(D + 0.1))
     Dist_scale = (1 - np.exp(-D/hscale))
     log10mass = np.log10(mass)
-    return np.nan_to_num(np.prod([gaussian_truncated_pdf(mag_,interpolator[interpol_indices[i]](log10mass) + A0s_notnan[i]*EJKs*Dist_scale + DM,np.sqrt((mag_errors_notnan[i]**2 + (interpolator[interpol_indices[i]+3](log10mass))**2)),interpolator[interpol_indices[i]+6](log10mass) + A0s_notnan[i]*EJKs*Dist_scale + DM) for i,mag_ in enumerate(mags_notnan)],axis=0))
+    return np.nan_to_num(np.prod([gaussian_truncated_pdf(mag_,interpolator[interpol_indices[i]](log10mass) + A0s_notnan[i]*EJKs*Dist_scale + DM,np.sqrt((mag_errors_notnan[i]**2 + (interpolator[interpol_indices[i]+len(bandnames)](log10mass))**2)),interpolator[interpol_indices[i]+2*len(bandnames)](log10mass) + A0s_notnan[i]*EJKs*Dist_scale + DM) for i,mag_ in enumerate(mags_notnan)],axis=0))
 
 def get_integral_PJHKsmass(dist_bins,hscale,mags_notnan,mag_errors_notnan,A0s_notnan,EJKs,IMF_params,interpolators,interpol_indices,ML,ML_indices,sig_lim,sig_cut,sigma_indices,max_indices,mass_index):
     """
@@ -681,7 +660,7 @@ def get_integral_PJHKsmass(dist_bins,hscale,mags_notnan,mag_errors_notnan,A0s_no
                 min_mass = np.min(mass_aux[:,mass_index])
                 max_mass = np.max(mass_aux[:,mass_index])
             else:
-                raise ValueError("There are not points nearby. This must be an error!")
+                raise ValueError("There are no points nearby. This must be an error!")
             mass_bins_lite = np.linspace(min_mass,max_mass,1000)
             Prior_mass = IMF_prob(mass_bins_lite,**IMF_params)
                     #product of truncated gaussians. If the observed magnitude is fainter than the maximum aparent magnitude at that mass, the probability is 0.
@@ -770,7 +749,7 @@ def samplemag(mass,D,mag_errors,hscale,A0s,EJKs,interpolator,ncomp=1):
         if mag_error is None:
             mag_error = 0
         m_i = interpolator[i](np.log10(mass)) + A0s[i]*EJKs*Dist_scale + DM
-        m_error_i = np.sqrt(np.nan_to_num(mag_error)**2 + (interpolator[i+3](np.log10(mass)))**2)
+        m_error_i = np.sqrt(np.nan_to_num(mag_error)**2 + (interpolator[i+len(bandnames)](np.log10(mass)))**2)
         #create PDF
         gauss = scipy.stats.norm(loc=m_i,scale=m_error_i)
         #draw magnitudes
@@ -1174,7 +1153,7 @@ def prepare_observables(mags,mag_errors,A0s,bandnames,def_mag_err,min_mag_error)
                 indices.append(i)
     return np.array(mags_notnan),np.array(mag_errors_notnan),np.array(A0s_notnan),np.array(indices)
     
-def mapper(row,l,b,sourceidrow,Jrow,Hrow,Ksrow,Jerow,Herow,Kserow,plxrow,plxerow,qualityrow,A0s,interpolators,ML,dist_bins,hscale,EJKs,PD,n0MS,bandnames,output_prefix,fileformat,params_all,IMF_params,rotation_curve,NDS_interpolators,components_names,def_mag_err=0.2,min_mag_error=0.05,sig_lim=10,sig_cut=0,_store_posteriors=False):
+def mapper(row,l,b,sourceidrow,Jrow,Hrow,Ksrow,Jerow,Herow,Kserow,plxrow,plxerow,qualityrow,A0s,interpolators,ML,dist_bins,hscale,EJKs,PD,n0MS,bandnames,output_prefix,fileformat,params_all,IMF_params,rotation_curve,NDS_interpolators,components_names,def_mag_err=0.2,min_mag_error=0.05,sig_lim=10,sig_cut=0,_store_posteriors=True):
     """
     l,b in degrees
     - mags: ALWAYS J, H and Ks in that order [mag]. They can be None.
@@ -1231,7 +1210,7 @@ def mapper(row,l,b,sourceidrow,Jrow,Hrow,Ksrow,Jerow,Herow,Kserow,plxrow,plxerow
     post = process_row(row,mags_notnan,mag_errors_notnan,A0s_notnan,interpol_indices,ML_indices,plx,plxerror,interpolators,ML,dist_bins[:nD],hscale,EJKs,IMF_params,PD,n0MS,components_names,sig_lim,sig_cut,sigma_indices,max_indices,mass_index)
     #store
     if _store_posteriors:
-        storefile(np.array(post),output_prefix,mags,l_data,b_data,plx,identity,fileformat,components_names,bandnames,lrow,brow,plxrow)
+        storefile(np.array(post),output_prefix_posteriors,mags,l_data,b_data,plx,identity,fileformat,components_names,bandnames,lrow,brow,plxrow)
     #sample
         #sample component
     icomp_rnd = sample_component_from_distPosterior(post,dist_bins[:nD])
@@ -1316,6 +1295,10 @@ def process_line_of_sight(infile):
 
 ### RUN CODE ###
 
+#some hardcoded things
+    #names of the three bands used
+bandnames = ["J","H","Ks"]
+
 if __name__ == "__main__":
     """
     Compute the posterior distribution functions of the Distance for all the stars along a single line of sight (within 0.025x0.025 deg^2 patch in the sky, corresponding to a point of the extinction map grid).
@@ -1330,11 +1313,6 @@ if __name__ == "__main__":
     #read input from the terminal
     args = read_inputs()    
     
-    #some hardcoded things
-        #names of the three bands used
-    bandnames = ["J","H","Ks"]
-    
-    
     #load constants
     cts = read_ini(args.constants_file)
     
@@ -1346,6 +1324,7 @@ if __name__ == "__main__":
     fileformat = args.outfile_extension
     output_folder = args.output_folder
     output_prefix = output_folder + cts["Basic"]["output_prefix"]
+    output_prefix_posteriors = output_folder + "posteriors/" + cts["Basic"]["output_prefix"]
 
         #look for all files containing the right keywords
     filelist = [data_folder+f for f in os.listdir(data_folder) if all(keywords in f for keywords in [cts["Basic"]["glon_colname"],cts["Basic"]["glat_colname"]])]
@@ -1412,6 +1391,7 @@ if __name__ == "__main__":
     ML_mag_offset = cts[photsys].getint("ML_mag_offset")
     ML_sig_offset = cts[photsys].getint("ML_sigma_offset")
     ML_max_offset = cts[photsys].getint("ML_max_offset")
+    ML_min_offset = cts[photsys].getint("ML_min_offset")
     ML = [np.loadtxt(MLdirectory+file) for component,file in dict(cts[cts["Basic"]["photsys"]]).items() if component.endswith("file")]
     interpolators = []
     for icomp,ML_i in enumerate(ML):
